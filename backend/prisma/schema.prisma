@@ -19,7 +19,7 @@ model User {
 
 model Room {
   id          Int          @id @default(autoincrement())
-  roomId      String
+  roomName      String
   createdBy   Int
   createdAt   DateTime     @default(now())
   creator     User         @relation("RoomCreated", fields: [createdBy], references: [id])
@@ -33,7 +33,7 @@ model Message {
   roomId    Int
   message   String
   user      User     @relation(fields: [userId], references: [id])
-  room      Room     @relation(fields: [roomId], references: [id])
+  room      Room     @relation(fields: [roomId], references: [id] , onDelete: Cascade)
   createdAt DateTime @default(now())
 }
 
@@ -43,7 +43,7 @@ model RoomMember {
   userId    Int
   joinedAt  DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
-  room      Room     @relation(fields: [roomId], references: [id])
+  room      Room     @relation(fields: [roomId], references: [id] , onDelete: Cascade)
 
   @@unique([userId, roomId])
 }

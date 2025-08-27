@@ -5,6 +5,10 @@ import type { Request , Response , NextFunction } from "express";
 import dotenv from "dotenv"
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
+import http from "http"
+import { setUpWebScoket } from "./websocket/socket"
+import { ca } from "zod/v4/locales/index.cjs";
+import { RecordWithTtl } from "dns";
 dotenv.config();
 
 const Prisma = new PrismaClient();
@@ -16,7 +20,8 @@ const userType = z.object({
     username: string(),
     password : string().min(8).max(20)
 })
-
+const server = http.createServer(app);
+setUpWebScoket(server);
 app.post("/users/register", async (req: Request, res: Response): Promise<void> => {
     const {username , password } = req.body ; 
     const  ParsedData = userType.safeParse({username , password});
@@ -74,8 +79,6 @@ app.post("/users/register", async (req: Request, res: Response): Promise<void> =
     }
     
 })
-
-
 // login router 
 app.post("/users/login", async (req : Request  , res : Response)=>{
     const {username  , password } = req.body ; 
@@ -123,6 +126,165 @@ app.post("/users/login", async (req : Request  , res : Response)=>{
         }
     }
 })
-app.listen(port , ()=>{
-    console.log("The app is running on the port "+port);
+
+app.get("/users/me", async (req: Request, res: Response): Promise<void> => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+        res.status(401).json({
+            status: false,
+            message: "Unauthorized"
+        });
+        return;
+    }
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECERT!);
+        const user = await Prisma.user.findFirst({
+            where: { id: (decoded as any).id }
+        });
+        if (!user) {
+            res.status(404).json({
+                status: false,
+                message: "User not found"
+            });
+            return;
+        }
+        res.status(200).json({
+            status: true,
+            user: {
+                id: user.id,
+                username: user.username
+            }
+        });
+    } catch (error) {
+        res.status(401).json({
+            status: false,
+            message: "Invalid token"
+        });
+    }
+});
+app.get("/users/rooms" , async (req : Request , res : Response)=>{
+    const userId = req.query.userId ;
+    try {
+        const AllRooms = await Prisma.roomMember.findMany({
+            where :{
+                userId:Number(userId),
+                },
+                include :{
+                    room :{
+                        select :{
+                            id : true  , 
+                            roomName :true , 
+                        }
+                    }
+                }
+        })
+        res.status(200).json({
+            status : true , 
+            rooms : AllRooms.map((r)=>({
+                id : r.room.id,
+                roomName  : r.room.roomName,
+            }))
+        })
+    }catch(error){
+        console.error(error);
+             res.json({
+                status : false , 
+                error : error 
+             })
+    }
+})
+app.get("/users/rooms/:roomId/:NoMessages", async (req: Request, res: Response): Promise<void> => {
+    const { roomId, NoMessages } = req.params;
+    // Fetch messages from the database or any other source
+    try{
+    const messages = await Prisma.message.findMany({
+        where:{
+            roomId:Number(roomId)
+        },
+        orderBy: {
+            createdAt: "asc"
+        },
+        include: {
+            user: {
+                select: {
+                    username: true
+                }
+            },
+        
+        },
+        take: Number(NoMessages)
+    });
+    res.status(200).json({
+        status: true,
+        messages
+    });
+} catch (error) {
+    res.status(500).json({
+        status: false,
+        message: "Error fetching messages"
+    });
+}
+});
+
+app.delete("/users/rooms/:roomId/:userId",async (req : Request , res : Response)=>{
+    const {roomId , userId} = req.params ; 
+    try{
+        await Prisma.room.delete({
+            where :{
+                id : Number(roomId),
+                createdBy : Number(userId)
+            }
+        })
+
+        res.status(200).json({
+            status : true , 
+            message : " successfully deleted room "
+        })
+    }catch(error){
+        console.error(error);
+        res.status(500).json({
+            status: false,
+            message: "Error deleting room"
+        });
+    }
+})
+
+
+app.delete("/users/rooms/:roomId/leave/:userId", async (req: Request, res: Response): Promise<void> => {
+        const {roomId  , userId } = req.params ; 
+        try{
+            const existedRoom = await Prisma.room.findFirst({
+                where :{
+                    id : Number(roomId)
+                }
+            })
+            if(!existedRoom){
+                res.status(404).json({
+                    status : false , 
+                    message : "room is not existed "
+                })
+                return ; 
+            }
+            await Prisma.roomMember.delete({
+                where: {
+                    userId_roomId: {
+                        userId: Number(userId),
+                        roomId: Number(roomId)
+                    }
+                }
+            })
+            res.status(200).json({
+                status: true,
+                message: "Successfully left room"
+            })
+        }catch(error){
+            console.error(error)
+            res.status(500).json({
+                status: false,
+                message: "Error leaving room"
+            })
+        }
+})
+server.listen(port, () => {
+    console.log("The app is running on the port " + port);
 })
