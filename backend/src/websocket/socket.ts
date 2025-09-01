@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Server } from "http";
+import { stat } from "fs";
 //    playload {
 //      type : join , 
 //      roomId : id,
@@ -38,7 +39,8 @@ export  function setUpWebScoket(server: Server) {
                          })
                          if (exist) {
                               socket.send(JSON.stringify({
-                                   type: "error",
+                                   status : false ,
+                                   type: "created",
                                    message: "The room name is already existd "
                               }))
                               return;
@@ -57,7 +59,8 @@ export  function setUpWebScoket(server: Server) {
                               })
 
                               socket.send(JSON.stringify({
-                                   type: "success",
+                                   status : true ,
+                                   type: "created",
                                    message: "succesfully room is created "
                               }))
                               return;
@@ -85,11 +88,15 @@ export  function setUpWebScoket(server: Server) {
                               }
                               rooms.get(parasedData.roomId)?.add(socket);
                               socket.send(JSON.stringify({
-                                   type: "success",
+                                   status : true ,
+                                   type: "joined",
                                    message: "Succesfully joined the room"
                               }))
                          } else {
-                              socket.send(JSON.stringify({ type: "error", message: "room doesn't existed" }))
+                              socket.send(JSON.stringify({ 
+                                   status : false ,
+                                   type: "joined", 
+                                   message: "room doesn't existed" }))
                          }
                     }
                     // remove socket when disconnected
@@ -118,7 +125,8 @@ export  function setUpWebScoket(server: Server) {
                          if (allsockets) {
                               for (const client of allsockets) {
                                    client.send(JSON.stringify({
-                                        type: "success",
+                                        status : true ,
+                                        type: "message",
                                         text: parasedData.text,
                                         userId: parasedData.userId,
                                         createdAt : message.createdAt

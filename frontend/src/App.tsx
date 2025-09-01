@@ -1,15 +1,37 @@
-import Landingpage from "./Pages/Landing"
-import {Routes , Route , Link  , BrowserRouter} from "react-router-dom" 
+import { Login } from "./Pages/login"
+import {Routes , Route  , BrowserRouter, Navigate} from "react-router-dom" 
+import HomePage from "./Pages/HomePage"
 export default function App(){
   return(
     <>
       <BrowserRouter>
         <Routes>
-           <Route path="/" element={<Landingpage/>}>
-            
+           <Route path="/login" element={<Login/>} />
+           {/* <Route path="/signIn" element></Route> */}
+
+           <Route path="/"
+            element={
+             <PrivateRoute>
+                <HomePage/>
+             </PrivateRoute>
+            }>    
            </Route>
           </Routes>    
       </BrowserRouter>
     </>
   )
 }
+
+
+type PrivateRouteProps = {
+  children: React.ReactNode;
+};
+
+
+const PrivateRoute = ({ children }: PrivateRouteProps) => {
+  const token: string | null = localStorage.getItem("token");
+  if(!token){
+    return <Navigate to="/login" replace/>
+  }
+  return <>{children}</>;
+};

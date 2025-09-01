@@ -6,14 +6,13 @@ import dotenv from "dotenv"
 import bcrypt from "bcrypt"
 import jwt from "jsonwebtoken"
 import http from "http"
+import cors from "cors"
 import { setUpWebScoket } from "./websocket/socket"
-import { ca } from "zod/v4/locales/index.cjs";
-import { RecordWithTtl } from "dns";
 dotenv.config();
-
 const Prisma = new PrismaClient();
 const app =  express();
 app.use(express.json());
+app.use(cors());
 const port = process.env.PORT || 3003; 
 
 const userType = z.object({
@@ -25,6 +24,13 @@ setUpWebScoket(server);
 app.post("/users/register", async (req: Request, res: Response): Promise<void> => {
     const {username , password } = req.body ; 
     const  ParsedData = userType.safeParse({username , password});
+    if(username == "null" || password == "null"){
+        res.json({
+            status : false ,
+            message : "username or password should not be null "
+        })
+        return ; 
+    }
     if(ParsedData.success){
         try{
             const ExistedUser =  await Prisma.user.findFirst({
@@ -128,7 +134,7 @@ app.post("/users/login", async (req : Request  , res : Response)=>{
 })
 
 app.get("/users/me", async (req: Request, res: Response): Promise<void> => {
-    const token = req.headers.authorization?.split(" ")[1];
+    const token = req.headers.authorization;
     if (!token) {
         res.status(401).json({
             status: false,
