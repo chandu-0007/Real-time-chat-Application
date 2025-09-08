@@ -8,11 +8,11 @@ type room = {
 }
 type messageProp = {
   id: number,
-  roomId :number,
+  roomId: number,
   message: string,
   messagedBy: string
   createdAt: any
-  isown: boolean,
+  isOwn: boolean,
 
 }
 type RoomProps = {
@@ -20,6 +20,18 @@ type RoomProps = {
   roomName: string,
   buttonfun: () => void
 };
+type member = {
+  username: string,
+  userId: number,
+  joinedAt: string
+}
+type currentroomProp = {
+  roomId: number | null,
+  roomName: string,
+  createdBy: number | null,
+  members: member[],
+  NoOfMembers: number | null
+}
 const Home = () => {
   const [userInfo, SetuserInfo] = useState({ userId: null, username: "" });
   const [rooms, Setrooms] = useState<room[]>([]);
@@ -27,7 +39,14 @@ const Home = () => {
   const socketContext = useSocket();
   const socket = socketContext?.socket;
   const [inputmsg, SetInputmsg] = useState<string>("")
-  const [currentroom , Setcurrentroom] = useState<number | null>(null)
+  const [currentroom, Setcurrentroom] = useState<currentroomProp>({
+    roomId: null,
+    roomName: "",
+    createdBy: null,
+    members: [],
+    NoOfMembers: null
+  })
+  const [ShowCreateRoom, SetShowCreateRoom] = useState<boolean>(false)
   // ✅ Hooks must always run, regardless of socket state
   useEffect(() => {
     const getInfo = async () => {
@@ -71,21 +90,22 @@ const Home = () => {
             alert(msg.message)
           }
           break;
-          case "message": 
-            if(msg.status){
-             Setmessages((prevs) => [
-               ...prevs,
-               {
-                 id: msg.messageId,
-                 roomId: msg.roomId,
-                 message: msg.text,
-                 messagedBy: msg.userId,
-                 createdAt: msg.createdAt,
-                 isown: msg.userId === userInfo.userId
-               }
-             ])
-            }
-            break ; 
+        case "message":
+          if (msg.status) {
+            console.log(msg)
+            Setmessages((prevs) => [
+              ...prevs,
+              {
+                id: msg.messageId,
+                roomId: msg.roomId,
+                message: msg.text,
+                messagedBy: msg.userId,
+                createdAt: msg.createdAt,
+                isOwn: msg.isOwn
+              }
+            ])
+          }
+          break;
         default:
           console.warn("Unknown WS message type:", msg.type);
       }
@@ -100,48 +120,70 @@ const Home = () => {
   if (!socket) {
     return <div>Connecting to WebSocket...</div>;
   }
-
-
+  const [roomInput, SetroomInput] = useState<string>("")
   const createRoom = () => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        type: "create",
-        roomName: "coders"
-      }))
+    if (roomInput != null) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: "create",
+          roomName: roomInput
+        }))
+      }
     }
+
   }
+
+
+  // fetch room messages 
   const getroomMesages = async (roomId: number) => {
-    Setcurrentroom(roomId);
     try {
-      const res = await axios.get(`http://localhost:3030/users/rooms/${roomId}/10`, {
-        headers: {
-          authorization: localStorage.getItem("token")
-        },
-      })
+      const [res, res1] = await Promise.all([
+        axios.get(`http://localhost:3030/users/rooms/${roomId}/messages`, {
+          headers: {
+            authorization: localStorage.getItem("token")
+          },
+        }),
+        axios.get(`http://localhost:3030/users/room/${roomId}/info`, {
+          headers: {
+            authorization: localStorage.getItem("token")
+          },
+        })
+      ])
       const data = res?.data
-      console.log(data);
       if (data.status) {
-        await Setmessages(data.messages);
+        const normalizedMessages = data.messages.map((m: any) => ({
+          ...m,
+        }));
+        Setmessages(normalizedMessages);
       } else {
         alert(data.message)
+      }
+
+      if (res1.status) {
+        console.log(res1.data);
+        Setcurrentroom(res1.data);
       }
     } catch (error) {
       alert("something wrong ...")
     }
-    console.log(messages);
   }
 
+
+  //  function send msg to the socket and backend 
   const SendMsg = async () => {
-    if (socket && socket.readyState == WebSocket.OPEN){
+    if (socket && socket.readyState == WebSocket.OPEN) {
       socket.send(JSON.stringify({
         type: "message",
-        roomId: currentroom ,
-        text : inputmsg
-          }))
+        roomId: currentroom,
+        text: inputmsg
+      }))
 
-        SetInputmsg("");
+      SetInputmsg("");
     }
   }
+
+
+
   return (
     <>
       <div className="">
@@ -160,10 +202,35 @@ const Home = () => {
                   </div>
                   <div className="text-3xl font-serif">Charts </div>
                 </div>
-                <div onClick={createRoom} className="cursor-pointer">
+                <div onClick={() => { SetShowCreateRoom(true) }} className=" relative cursor-pointer">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="orange" className="size-8 shadow-2xl items-center rounded-full shadow-amber-500 mt-2">
                     <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 9a.75.75 0 0 0-1.5 0v2.25H9a.75.75 0 0 0 0 1.5h2.25V15a.75.75 0 0 0 1.5 0v-2.25H15a.75.75 0 0 0 0-1.5h-2.25V9Z" clipRule="evenodd" />
                   </svg>
+                  {/* show creae room pop div  */}
+                  {
+                    ShowCreateRoom && <>
+                      <div className="absloure w-60 h-30 p-2 bg-gray-300 flex-col 
+                      items-center justify-center inline-flex overflow-hidden  rounded-xl">
+                        <div className="flex justify-evenly ">
+                          <div>
+                          <input onChange={(e) => SetroomInput(e.target.value)}
+                            value={roomInput}
+                            type="text" className="bg-white
+                           ml-1 text-gray-500" placeholder="room name here ."></input></div>
+                          <div onClick={()=>{SetShowCreateRoom((prev)=> !prev)}}
+                          className="rounded-full bg-orange-400 ml-4">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="size-6 ">
+                              <path fill-rule="evenodd" d="M5.47 5.47a.75.75 0 0 1 1.06 0L12 10.94l5.47-5.47a.75.75 0 1 1 1.06 1.06L13.06 12l5.47 5.47a.75.75 0 1 1-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 0 1-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+                            </svg>
+                          </div>
+                        </div>
+                        <button className="bg-orange-600 p-2 rounded-md mt-2.5 shadow-2xs  text-center text-white "
+                          onClick={createRoom}
+                        >create room </button>
+                      </div>
+                    </>
+                  }
                 </div>
               </div>
               {/* List of rooms */}
@@ -174,13 +241,33 @@ const Home = () => {
                 ))}
               </div>
             </div>
-            <div className="w-full flex flex-col p-1 pt-2  h-full ">
+            <div className="w-full flex flex-col   h-full ">
               {/* room chart  */}
-              <div className="w-full   flex-1 overflow-y-auto ">
+              <div className=" w-full h-15 flex justify-between items-center bg-gray-500/10 text-white  p-1.5 ">
+                <div className="p-1 flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="size-6">
+                    <path fill-rule="evenodd" d="M8.25 6.75a3.75 3.75 0 1 1 7.5 0 3.75 3.75 0 0 1-7.5 0ZM15.75 9.75a3 3 0 1 1 6 0 3 3 0 0 1-6 0ZM2.25 9.75a3 3 0 1 1 6 0 3 3 0 0 1-6 0ZM6.31 15.117A6.745 6.745 0 0 1 12 12a6.745 6.745 0 0 1 6.709 7.498.75.75 0 0 1-.372.568A12.696 12.696 0 0 1 12 21.75c-2.305 0-4.47-.612-6.337-1.684a.75.75 0 0 1-.372-.568 6.787 6.787 0 0 1 1.019-4.38Z" clip-rule="evenodd" />
+                    <path d="M5.082 14.254a8.287 8.287 0 0 0-1.308 5.135 9.687 9.687 0 0 1-1.764-.44l-.115-.04a.563.563 0 0 1-.373-.487l-.01-.121a3.75 3.75 0 0 1 3.57-4.047ZM20.226 19.389a8.287 8.287 0 0 0-1.308-5.135 3.75 3.75 0 0 1 3.57 4.047l-.01.121a.563.563 0 0 1-.373.486l-.115.04c-.567.2-1.156.349-1.764.441Z" />
+                  </svg>
+                  <div className="bg-none ml-1.5">
+                    <div className="text-xl">{currentroom.roomName}</div>
+                    <div className="text-gray-400">{currentroom.NoOfMembers} members </div>
+                  </div>
+                </div>
+                <div>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="size-6">
+                    <path fill-rule="evenodd" d="M10.5 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm0 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm0 6a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Z" clip-rule="evenodd" />
+                  </svg>
+                </div>
+              </div>
+              <div className="w-full   flex-1 no-scrollbar overflow-y-auto ">
                 {/* messages */}
-                {messages.map((child, index) => (
-                  <MessageBubble key={index} message={child.message} isOwn={child.isown} />
-                ))}
+                <div>
+                  {messages.map((child, index) => (
+                    <MessageBubble key={index} message={child.message} isOwn={child.isOwn} />
+                  ))}
+                </div>
+
               </div>
               <div className="flex border-t border-gray-300">
                 <input value={inputmsg} onChange={(event) => SetInputmsg(event.target.value)}
@@ -195,6 +282,7 @@ const Home = () => {
             </div>
           </div>
         </div>
+
       </div>
     </>
   )
@@ -203,7 +291,7 @@ function Room({ id, roomName, buttonfun }: RoomProps) {
   return (
     <>
       <div id={String(id)} onClick={buttonfun}
-        className="w-full h-10 cursor-pointer text-white p-1  flex justify-start hover:bg-gray-600">
+        className="w-full h-10 cursor-pointer text-white p-1 flex justify-start hover:bg-gray-600">
         <div className="rounded-full px-2  border-none">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="size-6">
             <path fillRule="evenodd" d="M8.25 6.75a3.75 3.75 0 1 1 7.5 0 3.75 3.75 0 0 1-7.5 0ZM15.75 9.75a3 3 0 1 1 6 0 3 3 0 0 1-6 0ZM2.25 9.75a3 3 0 1 1 6 0 3 3 0 0 1-6 0ZM6.31 15.117A6.745 6.745 0 0 1 12 12a6.745 6.745 0 0 1 6.709 7.498.75.75 0 0 1-.372.568A12.696 12.696 0 0 1 12 21.75c-2.305 0-4.47-.612-6.337-1.684a.75.75 0 0 1-.372-.568 6.787 6.787 0 0 1 1.019-4.38Z" clipRule="evenodd" />
@@ -221,8 +309,8 @@ const MessageBubble = ({ message, isOwn }: { message: string, isOwn: boolean }) 
     <div className={`flex ${isOwn ? "justify-end" : "justify-start"} mb-2`}>
       <div
         className={`max-w-xs md:max-w-md px-4 py-2 rounded-lg text-white ${isOwn
-            ? "bg-orange-400 rounded-br-none"
-            : "bg-gray-700 rounded-bl-none"
+          ? "bg-orange-400 rounded-br-none"
+          : "bg-gray-700 rounded-bl-none"
           }`}
       >
         {message}

@@ -1,146 +1,204 @@
 import { PrismaClient } from "@prisma/client";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Server } from "http";
-import { stat } from "fs";
-//    playload {
-//      type : join , 
-//      roomId : id,
-//      userId : id 
-//    }
-//  playload {
-//      type : create , 
-//      roomName  : "redroom" ,
-//      UserId : userId ,
-//  }
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
 
-// for message 
-// playload{
-//      type : message , 
-//      roomId : id , 
-//      userId : id , 
-//      text : "some message "
-// }
-const rooms = new Map<number, Set<WebSocket>>();
+dotenv.config();
+
 const Prisma = new PrismaClient();
-export  function setUpWebScoket(server: Server) {
-     const wss = new WebSocketServer({ server });
-     wss.on("connection", (socket) => {
-          console.log("connected sunncessfully");
+const rooms = new Map<number, Set<WebSocket>>();
 
-          socket.on("message", async (playload) => {
+interface JwtPayload {
+  id: number;
+}
 
-               const rawdata = playload.toString();
-               try {
-                    const parasedData = JSON.parse(rawdata);
-                    if (parasedData.type == "create") {
-                         const exist = await Prisma.room.findFirst({
-                              where:
-                                   { roomName: parasedData.roomName, createdBy: parasedData.userId }
-                         })
-                         if (exist) {
-                              socket.send(JSON.stringify({
-                                   status : false ,
-                                   type: "created",
-                                   message: "The room name is already existd "
-                              }))
-                              return;
-                         } else {
-                              const room = await Prisma.room.create({
-                                   data: {
-                                        roomName: parasedData.roomName,
-                                        createdBy: parasedData.userId,
-                                   }
-                              })
-                              await Prisma.roomMember.create({
-                                   data: {
-                                        roomId: room.id,
-                                        userId: parasedData.userId
-                                   }
-                              })
+interface MessagePayload {
+  type: string;
+  token?: string;
+  roomId?: number;
+  roomName?: string;
+  text?: string;
+}
 
-                              socket.send(JSON.stringify({
-                                   status : true ,
-                                   type: "created",
-                                   message: "succesfully room is created "
-                              }))
-                              return;
-                         }
-                    }
-                    if (parasedData.type == "join") {
-                         const existroom = await Prisma.room.findFirst({ where: { id: parasedData.roomId } })
-                         if (existroom) {
-                              const memberexisted = await Prisma.roomMember.findFirst({
-                                   where:{
-                                        userId: parasedData.userId,
-                                        roomId: parasedData.roomId
-                                   }
-                              })
-                              if(!memberexisted){
-                              await Prisma.roomMember.create({
-                                   data: {
-                                        roomId: parasedData.roomId,
-                                        userId: parasedData.userId
-                                   }
-                              })
-                              }
-                              if (!rooms.has(parasedData.roomId)) {
-                                   rooms.set(parasedData.roomId, new Set());
-                              }
-                              rooms.get(parasedData.roomId)?.add(socket);
-                              socket.send(JSON.stringify({
-                                   status : true ,
-                                   type: "joined",
-                                   message: "Succesfully joined the room"
-                              }))
-                         } else {
-                              socket.send(JSON.stringify({ 
-                                   status : false ,
-                                   type: "joined", 
-                                   message: "room doesn't existed" }))
-                         }
-                    }
-                    // remove socket when disconnected
-                    socket.on("close", () => {
-                           for( const [roomId , clients] of rooms.entries()){
-                               clients.delete(socket);
-                               if(clients.size === 0){
-                                   rooms.delete(roomId);
-                               }
-                           }
-                    });
+// ---------------------- AUTH ----------------------
+function authenticate(token: string | undefined, socket: WebSocket): JwtPayload | null {
+  if (!process.env.JWT_SECRET) {
+    socket.send(JSON.stringify({ status: false, type: "auth", message: "JWT secret not configured" }));
+    socket.close();
+    return null;
+  }
 
-                    if (parasedData.type == "message") {
-                         if (!rooms.has(parasedData.roomId)) {
-                              rooms.set(parasedData.roomId, new Set());
-                         }
-                          rooms.get(parasedData.roomId)?.add(socket);
-                         const  message = await Prisma.message.create({
-                              data: {
-                                   userId: parasedData.userId,
-                                   roomId: parasedData.roomId,
-                                   message: parasedData.text
-                              }
-                         })
-                         const allsockets = rooms.get(parasedData.roomId);
-                         if (allsockets) {
-                              for (const client of allsockets) {
-                                   client.send(JSON.stringify({
-                                        status : true ,
-                                        type: "message",
-                                        text: parasedData.text,
-                                        userId: parasedData.userId,
-                                        createdAt : message.createdAt
-                                   }))
-                              }
-                         }
-                         
-                    }
+  try {
+    const decoded = jwt.verify(token || "", process.env.JWT_SECRET) as JwtPayload;
+    if (!decoded || typeof decoded.id !== "number") {
+      throw new Error("Invalid token");
+    }
+    return decoded;
+  } catch (err) {
+    socket.send(JSON.stringify({ status: false, type: "auth", message: "Invalid token" }));
+    socket.close();
+    return null;
+  }
+}
 
-               } catch (err) {
-                    console.error("Invalid JSON:", err);
-                    socket.send("Error: message must be valid JSON");
-               }
+// ---------------------- HANDLERS ----------------------
+async function handleCreate(socket: WebSocket, user: JwtPayload, payload: MessagePayload) {
+  if (!payload.roomName) {
+    socket.send(JSON.stringify({ status: false, type: "created", message: "Room name required" }));
+    return;
+  }
 
+  const exist = await Prisma.room.findFirst({
+    where: { roomName: payload.roomName, createdBy: user.id },
+  });
+
+  if (exist) {
+    socket.send(JSON.stringify({ status: false, type: "created", message: "Room already exists" }));
+    return;
+  }
+
+  const room = await Prisma.room.create({
+    data: { roomName: payload.roomName, createdBy: user.id },
+  });
+
+  await Prisma.roomMember.create({
+    data: { roomId: room.id, userId: user.id },
+  });
+
+  socket.send(
+    JSON.stringify({
+      status: true,
+      type: "created",
+      room: { id: room.id, name: room.roomName },
+      message: "Room created successfully",
+    })
+  );
+}
+
+async function handleJoin(socket: WebSocket, user: JwtPayload, payload: MessagePayload) {
+  if (!payload.roomId) {
+    socket.send(JSON.stringify({ status: false, type: "joined", message: "Room ID required" }));
+    return;
+  }
+
+  const existroom = await Prisma.room.findFirst({ where: { id: payload.roomId } });
+  if (!existroom) {
+    socket.send(JSON.stringify({ status: false, type: "joined", message: "Room doesn't exist" }));
+    return;
+  }
+
+  const memberExisted = await Prisma.roomMember.findFirst({
+    where: { userId: user.id, roomId: payload.roomId },
+  });
+
+  if (!memberExisted) {
+    await Prisma.roomMember.create({
+      data: { roomId: payload.roomId, userId: user.id },
+    });
+  }
+
+  if (!rooms.has(payload.roomId)) {
+    rooms.set(payload.roomId, new Set());
+  }
+  rooms.get(payload.roomId)?.add(socket);
+
+  socket.send(JSON.stringify({ status: true, type: "joined", message: "Successfully joined the room" }));
+}
+
+async function handleMessage(socket: WebSocket, user: JwtPayload, payload: MessagePayload) {
+  if (!payload.roomId || !payload.text) {
+    socket.send(JSON.stringify({ status: false, type: "message", message: "Room ID and text required" }));
+    return;
+  }
+
+  if (!rooms.has(payload.roomId)) {
+    rooms.set(payload.roomId, new Set());
+  }
+  rooms.get(payload.roomId)?.add(socket);
+
+  const message = await Prisma.message.create({
+    data: { userId: user.id, roomId: payload.roomId, message: payload.text },
+  });
+
+  const allsockets = rooms.get(payload.roomId);
+  if (allsockets) {
+    for (const client of allsockets) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(
+          JSON.stringify({
+            status: true,
+            type: "message",
+            text: payload.text,
+            userId: user.id,
+            roomId: payload.roomId,
+            messageId: message.id,
+            isOwn : client === socket,
+            createdAt: message.createdAt,
           })
-     })
+        );
+      }
+    }
+  }
+}
+
+// ---------------------- MAIN SETUP ----------------------
+export function setUpWebSocket(server: Server) {
+  const wss = new WebSocketServer({ server });
+
+  wss.on("connection", (socket) => {
+    console.log("Client connected");
+
+    let user: JwtPayload | null = null;
+
+    // Clean up on disconnect
+    socket.on("close", () => {
+      for (const [roomId, clients] of rooms.entries()) {
+        clients.delete(socket);
+        if (clients.size === 0) {
+          rooms.delete(roomId);
+        }
+      }
+    });
+
+    socket.on("message", async (raw) => {
+      let payload: MessagePayload;
+      try {
+        payload = JSON.parse(raw.toString());
+      } catch {
+        socket.send(JSON.stringify({ status: false, message: "Invalid JSON" }));
+        return;
+      }
+
+      // First step must be auth
+      if (!user && payload.type !== "auth") {
+        socket.send(JSON.stringify({ status: false, message: "Unauthorized" }));
+        return;
+      }
+
+      switch (payload.type) {
+        case "auth":
+          user = authenticate(payload.token, socket);
+          if (user) {
+            socket.send(JSON.stringify({ status: true, type: "auth", message: "Authentication successful" }));
+          }
+          break;
+
+        case "create":
+          if (user) await handleCreate(socket, user, payload);
+          break;
+
+        case "join":
+          if (user) await handleJoin(socket, user, payload);
+          break;
+
+        case "message":
+          if (user) await handleMessage(socket, user, payload);
+          break;
+
+        default:
+          socket.send(JSON.stringify({ status: false, message: "Unknown action type" }));
+      }
+    });
+  });
 }
