@@ -39,14 +39,16 @@ const Home = () => {
   const socketContext = useSocket();
   const socket = socketContext?.socket;
   const [inputmsg, SetInputmsg] = useState<string>("")
+   const [roomInput, SetroomInput] = useState<string|null>(null)
   const [currentroom, Setcurrentroom] = useState<currentroomProp>({
     roomId: null,
     roomName: "",
-    createdBy: null,
+    createdBy: null, 
     members: [],
     NoOfMembers: null
   })
   const [ShowCreateRoom, SetShowCreateRoom] = useState<boolean>(false)
+  
   // ✅ Hooks must always run, regardless of socket state
   useEffect(() => {
     const getInfo = async () => {
@@ -120,7 +122,7 @@ const Home = () => {
   if (!socket) {
     return <div>Connecting to WebSocket...</div>;
   }
-  const [roomInput, SetroomInput] = useState<string>("")
+
   const createRoom = () => {
     if (roomInput != null) {
       if (socket && socket.readyState === WebSocket.OPEN) {
@@ -174,7 +176,7 @@ const Home = () => {
     if (socket && socket.readyState == WebSocket.OPEN) {
       socket.send(JSON.stringify({
         type: "message",
-        roomId: currentroom,
+        roomId: currentroom.roomId,
         text: inputmsg
       }))
 
@@ -202,8 +204,8 @@ const Home = () => {
                   </div>
                   <div className="text-3xl font-serif">Charts </div>
                 </div>
-                <div onClick={() => { SetShowCreateRoom(true) }} className=" relative cursor-pointer">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="orange" className="size-8 shadow-2xl items-center rounded-full shadow-amber-500 mt-2">
+                <div className=" relative cursor-pointer">
+                  <svg   onClick={() => { SetShowCreateRoom(true) }} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="orange" className="size-8 shadow-2xl items-center rounded-full shadow-amber-500 mt-2">
                     <path fillRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25ZM12.75 9a.75.75 0 0 0-1.5 0v2.25H9a.75.75 0 0 0 0 1.5h2.25V15a.75.75 0 0 0 1.5 0v-2.25H15a.75.75 0 0 0 0-1.5h-2.25V9Z" clipRule="evenodd" />
                   </svg>
                   {/* show creae room pop div  */}
@@ -213,8 +215,9 @@ const Home = () => {
                       items-center justify-center inline-flex overflow-hidden  rounded-xl">
                         <div className="flex justify-evenly ">
                           <div>
-                          <input onChange={(e) => SetroomInput(e.target.value)}
-                            value={roomInput}
+                          <input 
+                          value={roomInput?.toString()}
+                          onChange={(e) => SetroomInput(e.target.value)}
                             type="text" className="bg-white
                            ml-1 text-gray-500" placeholder="room name here ."></input></div>
                           <div onClick={()=>{SetShowCreateRoom((prev)=> !prev)}}
